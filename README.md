@@ -1,167 +1,249 @@
-# Grant
+# Grant (PHP Edition)
 
-Grant is a TypeScript Discord bot built for NFSF officer management. It uses slash commands, role-based access control, and a SQLite database (via Knex + `better-sqlite3`) to track officer records and marks.
+Grant is a **PHP Discord Interactions** bot for NFSF officer workflows, designed for **shared hosting** with a **MariaDB** database.
 
-## Features
+Unlike the old gateway-based runtime, this version uses Discord's HTTP interactions model: Discord sends slash-command payloads to your HTTPS endpoint, and your PHP app responds with JSON.
 
-- Dynamic command + event loading from the filesystem at startup.
-- Guild slash-command deployment through Discord REST.
-- Role-gated HR/MR/LR workflows.
-- Officer registration, lookup, mark adjustments, and removal.
-- Developer-only command lifecycle tools (deploy/reload/delete).
-- Structured embeds and timestamped console logging.
+## What changed
 
-## Tech Stack
+- Rebuilt from TypeScript/discord.js to PHP 8.1+.
+- Replaced SQLite/Knex with MariaDB/PDO.
+- Added strict Ed25519 Discord signature verification.
+- Added audit logging for administrative actions.
+- Implemented officer actions that were previously scaffolded (`promote`, `demote`, `blacklist`).
+- Added developer-only DB transfer commands:
+  - `/command export`
+  - `/command import`
 
-- Node.js + TypeScript (ESM)
-- [discord.js v14](https://discord.js.org)
-- Knex + SQLite (`better-sqlite3`)
-- dotenv
-- Docker
-
-## Project Structure
+## Architecture
 
 ```text
-src/
-├── index.ts                     # Bootstrap: env parsing, logger, bot initialization
-├── Bot/
-│   ├── Bot.ts                   # Discord client, command/event loading, command deployment APIs
-│   ├── Commands/
-│   │   ├── LR/                  # Low-rank utility commands
-│   │   ├── MR/                  # Mid-rank workflows (marks)
-│   │   ├── HR/                  # High-rank workflows (officer management)
-│   │   └── Developer/           # Developer-only command management
-│   └── Events/
-│       └── Essentials/          # ready, interactionCreate, guildCreate handlers
-├── Types/
-│   ├── Globals.d.ts             # ICommand, IEvent, Environment types
-│   └── Tables.d.ts              # Officer / Events table interfaces
-└── Util/
-    ├── EmbedTemplates.ts        # Shared embed builders
-    ├── Log.ts                   # Colored logger
-    └── Ranks.ts                 # Role ID groups/stacks for permission checks
+app/
+├── Config.php                      # Loads env values and validates required vars
+├── Database.php                    # PDO MariaDB connection factory
+├── Discord/
+│   ├── CommandCatalog.php          # Slash command JSON definitions
+│   └── InteractionHandler.php      # Command router + business logic
+├── Repository/
+│   ├── OfficerRepository.php       # Officer CRUD + marks/rank/blacklist/import/export
+│   └── AuditRepository.php         # Audit trail inserts
+└── Service/
+    └── RoleGate.php                # Role-based authorization helpers
+public/
+└── index.php                       # Web entrypoint for Discord interactions
+scripts/
+└── register_commands.php           # Registers slash commands via Discord REST
+sql/
+└── schema.sql                      # MariaDB schema
 ```
 
-## Prerequisites
+## Requirements
 
-- Node.js 20+ (or current LTS)
-- npm
-- A Discord bot application + token
-- A Discord server (guild) where the bot can register slash commands
+- PHP 8.1+ (8.2 recommended)
+- Extensions:
+  - `pdo`
+  - `pdo_mysql`
+  - `sodium` (required for request signature verification)
+  - `curl` (required for slash command registration script)
+- MariaDB 10.5+ (or compatible MySQL)
+- Public HTTPS endpoint (Discord requires HTTPS)
 
-## Environment Variables
+## Environment configuration
 
-Create a `.env` file in the repository root:
+Copy `.env.example` to `.env`:
 
 ```env
-TOKEN=your_discord_bot_token
-CLIENT=your_discord_application_client_id
-GUILD=your_discord_guild_id
-ENVIRONMENT=development
-DATABASE_URL=./grant.sqlite
+APP_ENV=production
+
+DISCORD_BOT_TOKEN=
+DISCORD_APPLICATION_ID=
+DISCORD_PUBLIC_KEY=
+DISCORD_GUILD_ID=
+
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=grant
+DB_USER=grant_user
+DB_PASSWORD=
+
+ROLE_IDS_MR_AND_HIGHER=
+ROLE_IDS_HR_AND_HIGHER=
+
+# Comma-separated Discord user IDs allowed to run developer data commands
+DEVELOPER_USER_IDS=
 ```
 
-### Variable meanings
+### Variable notes
 
-- `TOKEN`: bot token used for gateway login and REST command registration.
-- `CLIENT`: Discord application (client) ID.
-- `GUILD`: target guild ID for guild-scoped slash command deployment.
-- `ENVIRONMENT`: free-form environment label (e.g., `development`, `production`).
-- `DATABASE_URL`: SQLite file path used by Knex.
+- `DISCORD_BOT_TOKEN`: bot token from Discord Developer Portal → **Bot**.
+- `DISCORD_APPLICATION_ID`: application ID from Developer Portal → **General Information**.
+- `DISCORD_PUBLIC_KEY`: required for validating interaction signatures.
+- `DISCORD_GUILD_ID`:
+  - set for fast guild-scoped command iteration in dev,
+  - leave empty for global commands in production (global propagation may take time).
+- `ROLE_IDS_MR_AND_HIGHER`, `ROLE_IDS_HR_AND_HIGHER`: comma-separated role IDs used for permission gates.
+- `DEVELOPER_USER_IDS`: comma-separated user IDs allowed to run `/command export` and `/command import`.
 
-## Database Setup
+## MariaDB setup
 
-This repo does not currently include migrations. Ensure the SQLite database configured by `DATABASE_URL` contains at least the `Officers` table expected by commands:
-
-```sql
-CREATE TABLE IF NOT EXISTS Officers (
-  OfficerID INTEGER PRIMARY KEY AUTOINCREMENT,
-  Discord_Username TEXT NOT NULL,
-  Discord_ID TEXT NOT NULL UNIQUE,
-  Marks INTEGER NOT NULL DEFAULT 0
-);
-```
-
-An additional `Events` table type exists in `src/Types/Tables.d.ts`, but command handlers currently rely on `Officers`.
-
-## Install & Run
+Import schema:
 
 ```bash
-npm install
-npm run dev
+mysql -u <user> -p <database> < sql/schema.sql
 ```
 
-### Build for production
+Tables:
+
+- `officers`: officer records, marks, rank, blacklist state.
+- `officer_audit_logs`: audit trail for admin/developer actions.
+
+## Shared hosting deployment (detailed)
+
+### 1) Upload files
+
+Upload the repository to your hosting account (FTP/SFTP/file manager).
+
+### 2) Point web root correctly
+
+Preferred: set document root to `public/`.
+
+If your host cannot change document root, use a rewrite rule to route to `public/index.php`.
+
+Example root `.htaccess`:
+
+```apache
+RewriteEngine On
+RewriteRule ^$ public/index.php [L]
+RewriteRule ^(.*)$ public/$1 [L]
+```
+
+### 3) Configure PHP extensions
+
+Enable these in your hosting panel:
+
+- `pdo_mysql`
+- `sodium`
+- `curl`
+
+### 4) Create and connect database
+
+- Create a MariaDB database + user in hosting panel.
+- Import `sql/schema.sql`.
+- Fill DB values in `.env`.
+
+### 5) Set file placement for `.env`
+
+Place `.env` in project root (sibling to `app/`, `public/`, `scripts/`).
+Do **not** put `.env` inside `public/`.
+
+### 6) Prepare Discord application and bot
+
+In https://discord.com/developers/applications:
+
+1. Create (or open) your app.
+2. In **General Information**:
+   - copy **Application ID** → `DISCORD_APPLICATION_ID`
+   - copy **Public Key** → `DISCORD_PUBLIC_KEY`
+3. In **Bot**:
+   - create/reset token
+   - copy token → `DISCORD_BOT_TOKEN`
+
+### 7) Connect Discord to your hosted endpoint
+
+In **General Information** set **Interactions Endpoint URL** to your production endpoint, e.g.:
+
+- `https://your-domain.tld/index.php`
+- or `https://your-domain.tld/discord/interactions` (if routed there)
+
+Discord validates this URL by sending signed requests. If validation fails:
+
+- ensure HTTPS is valid,
+- ensure the endpoint returns proper JSON,
+- ensure `DISCORD_PUBLIC_KEY` is correct,
+- ensure `sodium` extension is enabled.
+
+### 8) Register slash commands
+
+Run from the project root:
 
 ```bash
-npm run build
-npm start
+php scripts/register_commands.php
 ```
 
-## Docker
+Use `DISCORD_GUILD_ID` for fast dev updates. Remove it for global commands when ready.
 
-Build image:
+### 9) Invite bot to your server
 
-```bash
-npm run dock
-```
+OAuth2 URL builder (Developer Portal → OAuth2 → URL Generator):
 
-Run container with env file:
+- Scopes:
+  - `bot`
+  - `applications.commands`
+- Bot permissions:
+  - `Send Messages`
+  - `Use Slash Commands`
+  - `Read Message History` (optional, helpful)
 
-```bash
-npm run containerize
-```
+Then invite the bot to your target guild.
 
-> The Dockerfile exposes port `3000`, but this bot does not run an HTTP server by default.
+### 10) Verify end-to-end
 
-## Command Surface
+- Run `/ping` in Discord.
+- If it fails, inspect your PHP error logs + web server logs.
+- Confirm `officer_audit_logs` is receiving admin/developer action entries.
+
+## Command surface
 
 ### LR
+- `/ping`
+- `/echo input:<text>`
 
-- `/ping` — simple health check reply.
-- `/echo input:<text>` — echoes text.
+### Marks
+- `/marks get [officer:<user>]`
+  - available for officers to view marks.
+- `/marks leaderboard [page:<int>]`
+  - paginated leaderboard (10 entries per page).
+- `/marks add officer:<user> amount:<int>` (MR+)
+- `/marks subtract officer:<user> amount:<int>` (MR+)
 
-### MR
-
-- `/marks add officer:<user> amount:<number>` — add marks (MR+).
-- `/marks subtract officer:<user> amount:<number>` — subtract marks (MR+).
-- `/marks get [officer:<user>]` — retrieve marks.
-
-### HR
-
-- `/officer register [user:<user>]` — self-register (LR+) or register another user (HR+).
-- `/officer info [officer:<user>]` — officer profile + marks.
-- `/officer remove [officer:<user>] [id:<discord_id>]` — remove officer (HR+).
-- `/officer promote` — currently scaffolded/not implemented.
-- `/officer demote` — currently scaffolded/not implemented.
-- `/officer blacklist` — currently scaffolded/not implemented.
+### HR+
+- `/officer register [user:<user>]`
+- `/officer info [officer:<user>]`
+- `/officer remove officer:<user>`
+- `/officer promote officer:<user> rank:<text>`
+- `/officer demote officer:<user> rank:<text>`
+- `/officer blacklist officer:<user> state:<on|off>`
 
 ### Developer-only
+- `/command export [limit:<int>] [offset:<int>]`
+  - exports officer rows to base64 JSON.
+  - use `offset` to paginate through large datasets (e.g. 0, 100, 200...).
+- `/command import payload:<base64>`
+  - imports rows from an export payload.
 
-- `/command deploy name:<command>`
-- `/command reload name:<command>`
-- `/command delete name:<command>`
+> For large data transfers, split work into smaller batches because Discord option/message sizes are limited.
 
-Developer commands are restricted by Discord user ID checks in `src/index.ts` (`BotDevelopers`).
+Example pagination flow for 1,200 officers:
+- `/command export limit:200 offset:0`
+- `/command export limit:200 offset:200`
+- `/command export limit:200 offset:400`
+- continue until the returned payload `pagination.count` is less than `pagination.limit`.
 
-## How it Works
+## Security notes
 
-1. `src/index.ts` parses `.env` (fallback to `process.env`), builds logger, then starts the bot.
-2. `Bot.ts` initializes Discord client + Knex connection.
-3. On startup the bot:
-   - checks DB connectivity,
-   - reads + registers events,
-   - loads command classes dynamically from folders,
-   - logs into Discord.
-4. On `guildCreate`, it deploys all currently loaded commands to the configured guild.
-5. On `interactionCreate`, it resolves command/subcommand and executes handler with error embeds on failure.
+- Every interaction request is signature-verified before processing.
+- Invalid signatures return `401` and are rejected.
+- Sensitive admin/developer actions are audit logged.
+- Mark subtraction clamps at zero.
 
-## Notes / Caveats
+## Local smoke checks
 
-- Several command messages are intentionally opinionated/casual; normalize wording if needed for production environments.
-- Some HR actions are placeholders and return a “not implemented” embed.
-- `DeleteAllCommands()` exists in `Bot.ts` but is not exposed as a slash command.
+```bash
+php -l public/index.php
+php -l app/Discord/InteractionHandler.php
+php -l scripts/register_commands.php
+```
 
 ## License
 
-ISC (from `package.json`).
+ISC.
