@@ -68,12 +68,13 @@ final class OfficerRepository
         ]);
     }
 
-    public function exportOfficers(int $limit): array
+    public function exportOfficers(int $limit, int $offset): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT discord_id, discord_username, marks, rank, is_blacklisted FROM officers ORDER BY officer_id ASC LIMIT :limit'
+            'SELECT discord_id, discord_username, marks, rank, is_blacklisted FROM officers ORDER BY officer_id ASC LIMIT :limit OFFSET :offset'
         );
         $stmt->bindValue(':limit', max(1, min($limit, 500)), PDO::PARAM_INT);
+        $stmt->bindValue(':offset', max(0, $offset), PDO::PARAM_INT);
         $stmt->execute();
 
         return $stmt->fetchAll() ?: [];

@@ -81,6 +81,8 @@ final class CommandCatalog
                 'options' => [
                     ['type' => 1, 'name' => 'export', 'description' => 'Export officers as base64 JSON', 'options' => [[
                         'name' => 'limit', 'description' => 'Number of rows to export (1-500, default 50)', 'type' => 4, 'required' => false, 'min_value' => 1, 'max_value' => 500,
+                    ], [
+                        'name' => 'offset', 'description' => 'Row offset for pagination (default 0)', 'type' => 4, 'required' => false, 'min_value' => 0,
                     ]]],
                     ['type' => 1, 'name' => 'import', 'description' => 'Import officers from base64 JSON export payload', 'options' => [[
                         'name' => 'payload', 'description' => 'Base64 string returned by /command export', 'type' => 3, 'required' => true,

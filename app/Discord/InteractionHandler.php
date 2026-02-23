@@ -54,11 +54,25 @@ final class InteractionHandler
 
         if ($sub === 'export') {
             $limit = (int) ($this->optionValueFrom($options, 'limit') ?? 50);
-            $rows = $this->officers->exportOfficers($limit);
+            $offset = (int) ($this->optionValueFrom($options, 'offset') ?? 0);
+
+            $limit = max(1, min($limit, 500));
+            $offset = max(0, $offset);
+
+            $rows = $this->officers->exportOfficers($limit, $offset);
+            $count = count($rows);
+
             $payload = [
                 'version' => 1,
                 'created_at' => gmdate('c'),
                 'type' => 'officers_export',
+                'pagination' => [
+                    'limit' => $limit,
+                    'offset' => $offset,
+                    'count' => $count,
+                    'next_offset' => $offset + $count,
+                    'has_more_possible' => $count === $limit,
+                ],
                 'rows' => $rows,
             ];
 
@@ -67,7 +81,7 @@ final class InteractionHandler
                 return $this->message('Export too large for one Discord message. Re-run with a lower limit.');
             }
 
-            $this->audits->log('developer_export', $actor['id'], null, ['rows' => count($rows), 'limit' => $limit]);
+            $this->audits->log('developer_export', $actor['id'], null, ['rows' => $count, 'limit' => $limit, 'offset' => $offset, 'next_offset' => $offset + $count]);
             return $this->message("Export payload:\n{$encoded}");
         }
 

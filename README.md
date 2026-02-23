@@ -212,12 +212,19 @@ Then invite the bot to your target guild.
 - `/officer blacklist officer:<user> state:<on|off>`
 
 ### Developer-only
-- `/command export [limit:<int>]`
+- `/command export [limit:<int>] [offset:<int>]`
   - exports officer rows to base64 JSON.
+  - use `offset` to paginate through large datasets (e.g. 0, 100, 200...).
 - `/command import payload:<base64>`
   - imports rows from an export payload.
 
 > For large data transfers, split work into smaller batches because Discord option/message sizes are limited.
+
+Example pagination flow for 1,200 officers:
+- `/command export limit:200 offset:0`
+- `/command export limit:200 offset:200`
+- `/command export limit:200 offset:400`
+- continue until the returned payload `pagination.count` is less than `pagination.limit`.
 
 ## Security notes
 
