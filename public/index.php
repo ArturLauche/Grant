@@ -25,9 +25,7 @@ try {
     $timestamp = $_SERVER['HTTP_X_SIGNATURE_TIMESTAMP'] ?? '';
 
     if (!verifyDiscordSignature($config->get('DISCORD_PUBLIC_KEY'), $timestamp, $body, $signature)) {
-        http_response_code(401);
-        echo json_encode(['error' => 'invalid request signature']);
-        exit;
+        respondJson(['error' => 'invalid request signature'], 401);
     }
 
     $interaction = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
@@ -43,16 +41,13 @@ try {
     $handler = new InteractionHandler($officers, $audits, $gate);
     $response = $handler->handle($interaction);
 
-    header('Content-Type: application/json');
-    echo json_encode($response, JSON_UNESCAPED_SLASHES);
+    respondJson($response, 200);
 } catch (Throwable $e) {
-    http_response_code(500);
-    header('Content-Type: application/json');
-    echo json_encode([
+    error_log('Grant interaction error: ' . $e->getMessage());
+    respondJson([
         'type' => 4,
         'data' => ['content' => 'Internal error. Check server logs.'],
-        'error' => $e->getMessage(),
-    ], JSON_UNESCAPED_SLASHES);
+    ], 500);
 }
 
 function verifyDiscordSignature(string $publicKeyHex, string $timestamp, string $body, string $signatureHex): bool
@@ -70,4 +65,12 @@ function verifyDiscordSignature(string $publicKeyHex, string $timestamp, string 
     }
 
     return sodium_crypto_sign_verify_detached($signature, $message, $publicKey);
+}
+
+function respondJson(array $payload, int $statusCode): void
+{
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES);
+    exit;
 }
