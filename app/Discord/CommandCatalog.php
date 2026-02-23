@@ -78,6 +78,7 @@ final class CommandCatalog
                 'name' => 'command',
                 'description' => 'Developer database maintenance commands',
                 'type' => 1,
+                'default_member_permissions' => '0',
                 'options' => [
                     ['type' => 1, 'name' => 'export', 'description' => 'Export officers as base64 JSON', 'options' => [[
                         'name' => 'limit', 'description' => 'Number of rows to export (1-500, default 50)', 'type' => 4, 'required' => false, 'min_value' => 1, 'max_value' => 500,

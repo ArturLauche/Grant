@@ -7,6 +7,7 @@ namespace Grant\Discord;
 use Grant\Repository\AuditRepository;
 use Grant\Repository\OfficerRepository;
 use Grant\Service\RoleGate;
+use Throwable;
 
 final class InteractionHandler
 {
@@ -76,7 +77,12 @@ final class InteractionHandler
                 'rows' => $rows,
             ];
 
-            $encoded = base64_encode((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
+            $jsonPayload = json_encode($payload, JSON_UNESCAPED_SLASHES);
+            if ($jsonPayload === false) {
+                return $this->message('Export encoding failed: ' . json_last_error_msg());
+            }
+
+            $encoded = base64_encode($jsonPayload);
             if (strlen($encoded) > 1700) {
                 return $this->message('Export too large for one Discord message. Re-run with a lower limit.');
             }
@@ -101,9 +107,13 @@ final class InteractionHandler
                 return $this->message('Invalid payload: JSON format is incorrect.');
             }
 
-            $count = $this->officers->importOfficers($decoded['rows']);
-            $this->audits->log('developer_import', $actor['id'], null, ['imported_rows' => $count]);
+            try {
+                $count = $this->officers->importOfficers($decoded['rows']);
+            } catch (Throwable $e) {
+                return $this->message('Import failed and was rolled back. Check server logs for details.');
+            }
 
+            $this->audits->log('developer_import', $actor['id'], null, ['imported_rows' => $count]);
             return $this->message("Import successful. Rows processed: {$count}.");
         }
 
@@ -117,6 +127,10 @@ final class InteractionHandler
         $actorId = $interaction['member']['user']['id'] ?? '';
         $roleIds = $interaction['member']['roles'] ?? [];
 
+        if (!$this->gate->isAtLeast($roleIds, 'MR')) {
+            return $this->message('Permission denied: MR or higher required.');
+        }
+
         if ($sub === 'get') {
             $target = $this->resolvedUser($interaction, $this->optionValueFrom($options, 'officer'));
             $targetId = $target['id'] ?? $actorId;
@@ -125,10 +139,6 @@ final class InteractionHandler
                 return $this->message('Officer not found.');
             }
             return $this->message(sprintf('%s has **%d** marks.', $officer['discord_username'], (int) $officer['marks']));
-        }
-
-        if (!$this->gate->isAtLeast($roleIds, 'MR')) {
-            return $this->message('Permission denied: MR or higher required.');
         }
 
         $target = $this->resolvedUser($interaction, $this->optionValueFrom($options, 'officer'));
@@ -156,11 +166,12 @@ final class InteractionHandler
         $options = $interaction['data']['options'][0]['options'] ?? [];
         $actor = $interaction['member']['user'] ?? ['id' => '', 'username' => 'unknown'];
         $roleIds = $interaction['member']['roles'] ?? [];
+        $isHR = $this->gate->isAtLeast($roleIds, 'HR');
 
         if ($sub === 'register') {
             $target = $this->resolvedUser($interaction, $this->optionValueFrom($options, 'user')) ?? $actor;
             $isSelf = ($target['id'] ?? '') === $actor['id'];
-            if (!$isSelf && !$this->gate->isAtLeast($roleIds, 'HR')) {
+            if (!$isSelf && !$isHR) {
                 return $this->message('Permission denied: HR required to register another officer.');
             }
 
@@ -171,21 +182,32 @@ final class InteractionHandler
 
         if ($sub === 'info') {
             $target = $this->resolvedUser($interaction, $this->optionValueFrom($options, 'officer')) ?? $actor;
+            $isSelf = ($target['id'] ?? '') === $actor['id'];
+
+            if (!$isSelf && !$isHR) {
+                return $this->message('Permission denied: HR or higher required.');
+            }
+
             $officer = $this->officers->findByDiscordId($target['id']);
             if ($officer === null) {
                 return $this->message('Officer not found.');
             }
 
-            return $this->message(sprintf(
-                "Officer: %s\nMarks: %d\nRank: %s\nBlacklisted: %s",
+            $content = sprintf(
+                "Officer: %s\nMarks: %d\nRank: %s",
                 $officer['discord_username'],
                 (int) $officer['marks'],
-                $officer['rank'] ?: 'N/A',
-                ((int) $officer['is_blacklisted']) === 1 ? 'Yes' : 'No'
-            ));
+                $officer['rank'] ?: 'N/A'
+            );
+
+            if ($isHR) {
+                $content .= sprintf("\nBlacklisted: %s", ((int) $officer['is_blacklisted']) === 1 ? 'Yes' : 'No');
+            }
+
+            return $this->message($content);
         }
 
-        if (!$this->gate->isAtLeast($roleIds, 'HR')) {
+        if (!$isHR) {
             return $this->message('Permission denied: HR or higher required.');
         }
 
@@ -201,6 +223,11 @@ final class InteractionHandler
         }
 
         if ($sub === 'promote' || $sub === 'demote') {
+            $officer = $this->officers->findByDiscordId($target['id']);
+            if ($officer === null) {
+                return $this->message('Officer not found.');
+            }
+
             $rank = trim((string) ($this->optionValueFrom($options, 'rank') ?? ''));
             if ($rank === '') {
                 return $this->message('Rank is required.');
@@ -211,6 +238,11 @@ final class InteractionHandler
         }
 
         if ($sub === 'blacklist') {
+            $officer = $this->officers->findByDiscordId($target['id']);
+            if ($officer === null) {
+                return $this->message('Officer not found.');
+            }
+
             $state = (string) ($this->optionValueFrom($options, 'state') ?? 'off');
             $isBlacklisted = $state === 'on';
             $this->officers->setBlacklisted($target['id'], $isBlacklisted);

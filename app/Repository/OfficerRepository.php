@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Grant\Repository;
 
 use PDO;
+use Throwable;
 
 final class OfficerRepository
 {
@@ -94,21 +95,33 @@ final class OfficerRepository
         );
 
         $count = 0;
-        foreach ($rows as $row) {
-            if (!is_array($row) || empty($row['discord_id']) || empty($row['discord_username'])) {
-                continue;
+
+        try {
+            $this->pdo->beginTransaction();
+
+            foreach ($rows as $row) {
+                if (!is_array($row) || empty($row['discord_id']) || empty($row['discord_username'])) {
+                    continue;
+                }
+
+                $stmt->execute([
+                    'discord_id' => (string) $row['discord_id'],
+                    'discord_username' => (string) $row['discord_username'],
+                    'marks' => max(0, (int) ($row['marks'] ?? 0)),
+                    'rank' => isset($row['rank']) && $row['rank'] !== '' ? (string) $row['rank'] : null,
+                    'is_blacklisted' => !empty($row['is_blacklisted']) ? 1 : 0,
+                ]);
+
+                $count += (int) $stmt->rowCount();
             }
 
-            $stmt->execute([
-                'discord_id' => (string) $row['discord_id'],
-                'discord_username' => (string) $row['discord_username'],
-                'marks' => max(0, (int) ($row['marks'] ?? 0)),
-                'rank' => isset($row['rank']) && $row['rank'] !== '' ? (string) $row['rank'] : null,
-                'is_blacklisted' => !empty($row['is_blacklisted']) ? 1 : 0,
-            ]);
-            $count += 1;
+            $this->pdo->commit();
+            return $count;
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
         }
-
-        return $count;
     }
 }

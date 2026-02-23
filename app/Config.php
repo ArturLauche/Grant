@@ -39,7 +39,6 @@ final class Config
             'DB_PORT',
             'DB_NAME',
             'DB_USER',
-            'DB_PASSWORD',
         ];
 
         $values = [];
@@ -50,6 +49,12 @@ final class Config
             }
             $values[$key] = $value;
         }
+
+        $dbPassword = getenv('DB_PASSWORD');
+        if ($dbPassword === false) {
+            throw new \RuntimeException('Missing required environment variable: DB_PASSWORD');
+        }
+        $values['DB_PASSWORD'] = $dbPassword;
 
         $values['APP_ENV'] = getenv('APP_ENV') ?: 'production';
         $values['DISCORD_GUILD_ID'] = getenv('DISCORD_GUILD_ID') ?: '';
